@@ -1,0 +1,10 @@
+# Binaries
+/app
+*.exe
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
