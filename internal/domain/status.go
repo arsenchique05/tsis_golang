@@ -50,6 +50,41 @@ func (a Availability) String() string {
 	}
 }
 
+// ProcessingStatus is the third, independent state dimension added in
+// Checkpoint 2. It tracks the asynchronous evaluation of a player:
+//
+//	Pending -> Queued -> Processing -> Completed
+//	                          \-> Failed
+//
+// Pending is the zero value, so a freshly created player is "not submitted yet".
+type ProcessingStatus int
+
+const (
+	Pending ProcessingStatus = iota
+	Queued
+	Processing
+	Completed
+	Failed
+)
+
+// String implements fmt.Stringer.
+func (s ProcessingStatus) String() string {
+	switch s {
+	case Pending:
+		return "Pending"
+	case Queued:
+		return "Queued"
+	case Processing:
+		return "Processing"
+	case Completed:
+		return "Completed"
+	case Failed:
+		return "Failed"
+	default:
+		return "UnknownProcessingStatus"
+	}
+}
+
 // Position is the player's role on the pitch.
 type Position int
 

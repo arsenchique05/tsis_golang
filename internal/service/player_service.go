@@ -3,6 +3,7 @@ package service
 
 import (
 	"fmt"
+	"sync"
 
 	"footballers/internal/domain"
 	"footballers/internal/repository"
@@ -10,7 +11,18 @@ import (
 
 // PlayerService depends on the repository INTERFACE, injected through the
 // constructor. It does not know (or care) that the data lives in a map.
+//
+// mu serializes every read-modify-write sequence (see apply). The repository's
+// own lock only protects single calls; without mu two goroutines could both
+// Get the same player, change different fields, and the second Update would
+// silently overwrite the first one (a "lost update", even with no data race).
+// Plain reads (Get, Find*) do not take mu: they go straight to the repository,
+// whose RWMutex already makes them safe.
+//
+// Lock order is always service.mu -> repository.mu and the repository never
+// calls back into the service, so the two locks cannot deadlock.
 type PlayerService struct {
+	mu   sync.Mutex
 	repo repository.PlayerRepository
 }
 
@@ -87,7 +99,15 @@ func (s *PlayerService) FindByPosition(pos domain.Position) []domain.Player {
 // repo.Get -> domain method -> repo.Update.
 // The player is a local copy, so if the domain rule fails nothing is saved.
 // Errors are wrapped with %w: context is added, but errors.Is still finds the sentinel.
+//
+// The whole sequence runs under s.mu, which makes it atomic with respect to
+// every other state change. The critical section is tiny (a map lookup, a few
+// field assignments, a map store): the slow work (domain.Evaluate) is never
+// done while holding the lock.
 func (s *PlayerService) apply(id int, action string, change func(*domain.Player) error) (domain.Player, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	p, err := s.repo.Get(id)
 	if err != nil {
 		return domain.Player{}, fmt.Errorf("%s player %d: %w", action, id, err)

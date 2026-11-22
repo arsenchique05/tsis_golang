@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"footballers/internal/domain"
+	"footballers/internal/processing"
 	"footballers/internal/repository"
 	"footballers/internal/service"
 )
@@ -71,6 +72,57 @@ func main() {
 	fmt.Println("\n== Forwards ==")
 	for _, p := range svc.FindByPosition(domain.FWD) {
 		fmt.Println(format(p))
+	}
+
+	// 7. Checkpoint 2: evaluate the players concurrently with a worker pool.
+	retired := must(svc.Register("Zlatan Ibrahimovic", "Sweden", domain.FWD, "AC Milan"))
+	must(svc.Retire(retired.ID)) // a retired player cannot be evaluated -> Failed
+	ids = append(ids, retired.ID)
+
+	fmt.Println("\n== Worker pool: 3 workers, queue capacity 8 ==")
+	pool, err := processing.NewPool(svc, processing.Config{Workers: 3, QueueSize: 8})
+	if err != nil {
+		log.Fatalf("new pool: %v", err)
+	}
+	if err := pool.Start(); err != nil {
+		log.Fatalf("start pool: %v", err)
+	}
+	fmt.Println("workers running:", pool.ActiveWorkers())
+
+	for _, id := range ids {
+		if err := pool.Submit(id); err != nil { // returns immediately, does not wait
+			log.Fatalf("submit: %v", err)
+		}
+	}
+	// Submitting the same player again is rejected, whatever stage it is in.
+	if err := pool.Submit(ids[0]); err != nil {
+		fmt.Println("duplicate submit:", err)
+		fmt.Println("is ErrInvalidTransition:", errors.Is(err, domain.ErrInvalidTransition))
+	}
+
+	// Shutdown stops accepting tasks, lets the workers finish everything that
+	// was accepted, and waits for them to exit. Afterwards all results are final.
+	pool.Shutdown()
+	fmt.Println("workers running after shutdown:", pool.ActiveWorkers())
+
+	fmt.Println("\n== Evaluation results ==")
+	for _, id := range ids {
+		p, err := svc.Get(id)
+		if err != nil {
+			log.Fatalf("get: %v", err)
+		}
+		switch p.Processing {
+		case domain.Completed:
+			fmt.Printf("#%d %-18s %-10s %s\n", p.ID, p.Name, p.Processing, p.Report.Summary)
+		default:
+			fmt.Printf("#%d %-18s %-10s %s\n", p.ID, p.Name, p.Processing, p.Failure)
+		}
+	}
+
+	fmt.Println("\n== Submit after shutdown ==")
+	if err := pool.Submit(ids[0]); err != nil {
+		fmt.Println("error:", err)
+		fmt.Println("is ErrPoolStopped:", errors.Is(err, processing.ErrPoolStopped))
 	}
 }
 

@@ -13,4 +13,6 @@ var (
 	ErrInvalidTransition = errors.New("invalid state transition")
 	// ErrInvalidPlayer is returned when player data fails validation.
 	ErrInvalidPlayer = errors.New("invalid player")
+	// ErrNotEvaluable is returned when a player cannot be evaluated (for example a retired player).
+	ErrNotEvaluable = errors.New("player cannot be evaluated")
 )

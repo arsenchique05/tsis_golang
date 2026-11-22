@@ -17,6 +17,11 @@ type Player struct {
 	Availability Availability
 	Club         string // owning club; empty for FreeAgent
 	LoanClub     string // club the player is loaned to; only set while OnLoan
+
+	// Checkpoint 2: asynchronous evaluation. Third independent dimension.
+	Processing ProcessingStatus
+	Report     Report // valid only when Processing == Completed
+	Failure    string // reason; set only when Processing == Failed
 }
 
 // NewPlayer validates the input and builds a Player.
@@ -156,6 +161,61 @@ func (p *Player) Retire() error {
 	p.Club = ""
 	p.LoanClub = ""
 	p.Availability = Fit
+	return nil
+}
+
+// --- Processing transitions (Checkpoint 2) ---
+//
+// These only change the Processing dimension. They are plain methods on a
+// copy of the player: making them atomic is the job of the service layer.
+
+// Enqueue marks a pending player as accepted for processing: Pending -> Queued.
+func (p *Player) Enqueue() error {
+	if p.Processing != Pending {
+		return p.invalid("enqueue", "processing status is "+p.Processing.String())
+	}
+	p.Processing = Queued
+	return nil
+}
+
+// Dequeue rolls back Enqueue when the queue rejected the player: Queued -> Pending.
+func (p *Player) Dequeue() error {
+	if p.Processing != Queued {
+		return p.invalid("dequeue", "processing status is "+p.Processing.String())
+	}
+	p.Processing = Pending
+	return nil
+}
+
+// StartProcessing is the "claim" step a worker performs: Queued -> Processing.
+// Because it fails for any other status, two workers can never both claim one player.
+func (p *Player) StartProcessing() error {
+	if p.Processing != Queued {
+		return p.invalid("start processing", "processing status is "+p.Processing.String())
+	}
+	p.Processing = Processing
+	return nil
+}
+
+// CompleteProcessing stores the result: Processing -> Completed.
+func (p *Player) CompleteProcessing(r Report) error {
+	if p.Processing != Processing {
+		return p.invalid("complete processing", "processing status is "+p.Processing.String())
+	}
+	p.Processing = Completed
+	p.Report = r
+	p.Failure = ""
+	return nil
+}
+
+// FailProcessing records a failed evaluation: Processing -> Failed.
+func (p *Player) FailProcessing(reason string) error {
+	if p.Processing != Processing {
+		return p.invalid("fail processing", "processing status is "+p.Processing.String())
+	}
+	p.Processing = Failed
+	p.Report = Report{}
+	p.Failure = reason
 	return nil
 }
 
